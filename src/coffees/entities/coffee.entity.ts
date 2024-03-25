@@ -1,4 +1,5 @@
 import { Field, ID, ObjectType } from '@nestjs/graphql'
+import { Flavor } from './flavor.entity'
 
 @ObjectType({ description: 'Coffee Model' })
 export class Coffee {
@@ -7,5 +8,6 @@ export class Coffee {
   name: string
   brand: string
   category: string
-  flavors: string[]
+  @Field(() => [Flavor], { nullable: 'items' })
+  flavors: Flavor[]
 }

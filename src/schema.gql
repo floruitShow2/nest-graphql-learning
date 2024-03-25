@@ -2,14 +2,21 @@
 # THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
 # ------------------------------------------------------
 
+type Flavor {
+  """A unique identifier for flavor"""
+  id: ID
+  name: String!
+  category: String!
+}
+
 """Coffee Model"""
 type Coffee {
   """A unique identifier"""
   id: ID
+  flavors: [Flavor!]!
   name: String!
   brand: String!
   category: String!
-  flavors: [String!]!
 }
 
 type Query {
@@ -26,5 +33,4 @@ input CreateCoffeeInput {
   name: String!
   brand: String!
   category: String!
-  flavors: [String!]!
 }

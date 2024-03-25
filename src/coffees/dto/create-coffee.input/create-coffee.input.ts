@@ -6,5 +6,4 @@ export class CreateCoffeeInput {
   name: string
   brand: string
   category: string
-  flavors: string[]
 }
