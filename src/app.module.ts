@@ -5,14 +5,20 @@ import { join } from 'path'
 import { AppController } from './app.controller'
 import { AppService } from './app.service'
 import { CoffeesModule } from './coffees/coffees.module'
+import { PubsubModule } from './pubsub/pubsub.module'
 
 @Module({
   imports: [
     GraphQLModule.forRoot<ApolloDriverConfig>({
       driver: ApolloDriver,
-      autoSchemaFile: join(process.cwd(), 'src/schema.gql')
+      autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
+      // 在 Apollo Driver 上激活 Subscription 功能
+      subscriptions: {
+        'graphql-ws': true
+      }
     }),
-    CoffeesModule
+    CoffeesModule,
+    PubsubModule
   ],
   controllers: [AppController],
   providers: [AppService]
