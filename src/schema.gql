@@ -19,9 +19,29 @@ type Coffee {
   category: String!
 }
 
+type HumanEntity implements Character {
+  id: ID!
+  name: String!
+  job: String!
+  friends(name: String!): [HumanEntity!]!
+}
+
+interface Character {
+  id: ID!
+  name: String!
+}
+
 type Query {
   coffees: [Coffee!]!
   coffee(id: ID!): Coffee
+  characters: HumanEntity!
+  search: [ResultUnion!]!
+}
+
+union ResultUnion = HumanEntity | SocialEntity
+
+type SocialEntity {
+  url: String!
 }
 
 type Mutation {

@@ -6,6 +6,7 @@ import { AppController } from './app.controller'
 import { AppService } from './app.service'
 import { CoffeesModule } from './coffees/coffees.module'
 import { PubsubModule } from './pubsub/pubsub.module'
+import { HumanModule } from './human/human.module'
 
 @Module({
   imports: [
@@ -18,7 +19,8 @@ import { PubsubModule } from './pubsub/pubsub.module'
       }
     }),
     CoffeesModule,
-    PubsubModule
+    PubsubModule,
+    HumanModule
   ],
   controllers: [AppController],
   providers: [AppService]

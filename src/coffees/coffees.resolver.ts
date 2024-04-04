@@ -1,4 +1,13 @@
-import { Resolver, Query, ID, Args, Mutation, ResolveField, Parent, Subscription } from '@nestjs/graphql'
+import {
+  Resolver,
+  Query,
+  ID,
+  Args,
+  Mutation,
+  ResolveField,
+  Parent,
+  Subscription
+} from '@nestjs/graphql'
 import { ParseIntPipe } from '@nestjs/common'
 import { PubSub } from 'graphql-subscriptions'
 import { CreateCoffeeInput } from './dto/create-coffee.input/create-coffee.input'
@@ -7,7 +16,6 @@ import { Flavor } from './entities/flavor.entity'
 
 @Resolver(() => Coffee)
 export class CoffeesResolver {
-
   constructor(private readonly pubsub: PubSub) {}
 
   @Query(() => [Coffee], { name: 'coffees' })
@@ -17,6 +25,7 @@ export class CoffeesResolver {
 
   @Query(() => Coffee, { name: 'coffee', nullable: true })
   async findCoffeeById(@Args('id', { type: () => ID }, ParseIntPipe) id: number) {
+    console.log(id)
     return null
   }
 
@@ -41,20 +50,18 @@ export class CoffeesResolver {
     return newCoffee
   }
 
-  @Subscription(
-    (returns) => Coffee,
-    {
-      name: 'coffeeAdded',
-      // filter: (payload, variables) => (
-      //   payload.coffeeAdded.id === variables.id
-      // ),
-      resolve(this: CoffeesResolver, value) {
-        console.log(this)
-        return value
-      }
+  @Subscription(() => Coffee, {
+    name: 'coffeeAdded',
+    // filter: (payload, variables) => (
+    //   payload.coffeeAdded.id === variables.id
+    // ),
+    resolve(this: CoffeesResolver, value) {
+      console.log(this)
+      return value
     }
-  )
+  })
   subscribeToCoffeeAdded(@Args('id') id: number) {
+    console.log(id)
     return this.pubsub.asyncIterator('coffeeAdded')
   }
 }
