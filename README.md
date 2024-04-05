@@ -10,11 +10,17 @@
 
 `GraphQLModule` 可以配置为使用 **Apollo** 服务器(使用 `@nestjs/apollo` 驱动程序)和 **Mercurius**(使用 `@nestjs/mercurius`)。Nestjs 为这些经过验证的 GraphQL 软件包提供了官方集成，以提供一种简单的方式在 Nest 中使用 GraphQL。
 
+
+
+[源码]: https://github.com/floruitShow2/nest-graphql-learning
+
+
+
 ## 二、快速开始
 
 ### （一）介绍
 
-Nest提供了两种构建 GraphQL 应用程序的方式：**代码优先**和**模式优先**。你可以选择你更偏爱的方式，在本章节中，大多数 GraphQL 相关的片段都分为这两个主要部分。
+Nest提供了两种构建 GraphQL 应用程序的方式：**代码优先**和**模式优先**。在 Nestjs 官方文档中，大多数 GraphQL 相关章节都分为这两个部分吗，你可以选择你更偏爱的方式。
 
 在**代码优先**方法中，需要使用 `装饰器` 和 `TypeScript Class` 来生成相应的 GraphQL Schema。如果你倾向于只使用 TypeScript，避免在不同语言语法之间切换上下文，这种方法就很有用。
 
@@ -497,9 +503,11 @@ query {
 }
 ```
 
+![image-20240325094147294](C:\Users\23200\AppData\Roaming\Typora\typora-user-images\image-20240325094147294.png)
+
 ## 四、Mutations
 
-大多关于 GraphQL 的讨论主要集中于如何获取数据，但是任何完整的数据平台也需要编辑服务端数据的方法。在 REST 中，每个请求都可以在服务端产生副作用，但是按REST的最佳实践来说，GET 方法尽量不要修改服务端数据。
+大多关于 GraphQL 的讨论主要集中于如何获取数据上，但是任何完整的数据平台都是需要修改服务端数据的方法的。在 REST 中，理论上每个请求都可以在服务端产生副作用，但是就前人总结的最佳实践来说，尽量不要在 GET 方法中修改服务端数据。
 
 GraphQL 类似，每个 query 都有可能实现数据修改，但是，尽量还是遵守惯例，将所有涉及数据写入的操作通过 Mutation 实现。
 
@@ -565,3 +573,721 @@ mutation {
 ```
 
 ![image-20240325094011219](C:\Users\23200\AppData\Roaming\Typora\typora-user-images\image-20240325094011219.png)
+
+## 五、Subscriptions
+
+除了使用 Query 查询数据和使用 Mutation 修改数据，GraphQL 规范还提供了第三种操作规范：Subscription。
+
+当客户端选择监听服务端的实时信息时，服务端会通过 Subscription 的方式将数据推送给客户端，和使用 Query 查询某个字段集合时仅返回一次响应相比，Subscription 会开启一个信息通道，每当服务端发生特定事件时将响应发送至客户端。
+
+但是，Subscription 并不是保持前后端状态一致的最佳方案，应该是在用户执行相关操作后，重新执行 Query 获取数据以更新状态。
+
+常见的应用场景如下：
+
+第一种，订阅对大对象的小增量修改。重复轮询大型对象对资源的消耗是昂贵的，尤其当大多数对象字段并不会经常发生更改，一般情况，应当使用 Query 查询数据的初始状态，并在更新发生时将其推送到指定字段。
+
+另一种，低延迟实时更新。比如，聊天应用程序的客户端希望可以尽可能早地接收到新消息。
+
+### （一）开启订阅功能
+
+之前，我们想要开启订阅功能，需要在 GraphQLModule 的配置项上设置 `installSubscriptionHandlers: true` 
+
+```ts
+GraphQLModule.forRoot<ApolloDriverConfig>({
+    driver: ApolloDriver,
+    autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
+    // 在 Apollo Driver 上激活 Subscription 功能
+    installSubscriptionHandlers: true
+})
+```
+
+但在最新版本的 Apollo 服务，该配置项已经被移除，并会在不久后废弃。Nestjs 官方推荐使用 `graphql-ws` 替代。
+
+```ts
+GraphQLModule.forRoot<ApolloDriverConfig>({
+    driver: ApolloDriver,
+    autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
+    // 在 Apollo Driver 上激活 Subscription 功能
+    subscriptions: {
+    	'graphql-ws': true
+    }
+})
+```
+
+### （二）基本使用
+
+安装依赖
+
+```bash
+npm i graphql-subscriptions
+```
+
+创建 `PubsubModule`，引入并暴露 PubSub 类
+
+```
+nest g mo pubsub
+```
+
+```ts
+import { Module } from '@nestjs/common';
+import { PubSub } from 'graphql-subscriptions'
+
+@Module({
+    providers: [PubSub],
+    exports: [PubSub]
+})
+export class PubsubModule {}
+```
+
+编写一个基本的 Subscription 函数，我们在上文编写的 coffee.resolver.ts 的基础上添加一个 coffeeAdded 函数。
+
+```ts
+import { Resolver, Query, ID, Args, Mutation, ResolveField, Parent, Subscription } from '@nestjs/graphql'
+import { ParseIntPipe } from '@nestjs/common'
+import { PubSub } from 'graphql-subscriptions'
+import { CreateCoffeeInput } from './dto/create-coffee.input/create-coffee.input'
+import { Coffee } from './entities/coffee.entity'
+import { Flavor } from './entities/flavor.entity'
+
+@Resolver(() => Coffee)
+export class CoffeesResolver {
+
+  constructor(private readonly pubsub: PubSub) {}
+
+  @Query(() => [Coffee], { name: 'coffees' })
+  async findAllCoffees() {
+    return []
+  }
+
+  @Query(() => Coffee, { name: 'coffee', nullable: true })
+  async findCoffeeById(@Args('id', { type: () => ID }, ParseIntPipe) id: number) {
+    return null
+  }
+
+  @ResolveField('flavors', () => [Flavor])
+  async getFlavors(@Parent() coffee: Coffee) {
+    const { category } = coffee
+    console.log(category)
+    // return this.flavorService.findAllFlavors({ category })
+    return [{ name: 'test flavor', category: 'test category' }]
+  }
+
+  @Mutation(() => String, { name: 'createCoffee', nullable: true })
+  async create(@Args('createCoffeeInput') createCoffeeInput: CreateCoffeeInput) {
+    console.log(createCoffeeInput)
+    return 'success ok'
+  }
+
+  @Subscription((returns) => Coffee, { name: 'coffeeAdded' })
+  subscribeToCoffeeAdded() {
+    return this.pubsub.asyncIterator('coffeeAdded')
+  }
+}
+```
+
+新增的 coffeeAdded 函数通过调用 `pubsub.asyncIterator` 实现事件订阅。
+
+`asyncIterator`接收一个参数 triggerName，表示触发订阅的事件名称。
+
+启动项目，gql 文件会生成如下内容：
+
+```graphql
+type Subscription {
+  coffeeAdded: Coffee!
+}
+```
+
+订阅事件会返回一个以事件名【传递给 Subscription 装饰器的 name】为键的对象作为响应结果。
+
+### （三）事件发布
+
+订阅事件以后，可以使用 `PubSub.publish` 方法推送事件。一般是把 publish 逻辑写在 Mutation 中，在对象实体发生变化时触发客户端更新。
+
+我们在之前定义的 `create` 方法中编写这部分代码：
+
+```ts
+import { Resolver, Query, ID, Args, Mutation, ResolveField, Parent, Subscription } from '@nestjs/graphql'
+import { PubSub } from 'graphql-subscriptions'
+import { CreateCoffeeInput } from './dto/create-coffee.input/create-coffee.input'
+import { Coffee } from './entities/coffee.entity'
+import { Flavor } from './entities/flavor.entity'
+
+@Resolver(() => Coffee)
+export class CoffeesResolver {
+
+  constructor(private readonly pubsub: PubSub) {}
+
+  @Mutation(() => Coffee, { name: 'createCoffee', nullable: true })
+  async create(@Args('createCoffeeInput') createCoffeeInput: CreateCoffeeInput) {
+    const newCoffee = {
+      ...createCoffeeInput,
+      id: +(Math.random() * 10).toFixed(0),
+      flavors: []
+    }
+    console.log('new coffee', newCoffee)
+    this.pubsub.publish('coffeeAdded', { coffeeAdded: newCoffee })
+    return newCoffee
+  }
+    
+  @Subscription((returns) => Coffee, { name: 'coffeeAdded' })
+  subscribeToCoffeeAdded() {
+    return this.pubsub.asyncIterator('coffeeAdded')
+  }
+}
+```
+
+`PubSub.publish` 方法需要接收两个参数：
+
+1. `triggerName`：事件名
+2. `payload`：数据负载
+
+正如上文所提到的，Subscription 会返回具有特定结构的对象【`subscribeToCoffeeAdded` 需要返回 `Coffee` 实体】。需要注意的是，该对象必须用事件名作为键，包裹起来后再返回给客户端。否则，graphql 会在校验阶段报错。
+
+测试下效果
+
+**subscription**
+
+```graphql
+subscription CoffeeAdded {
+    coffeeAdded {
+        id
+        name
+        brand
+        category
+    }
+}
+```
+
+**publish**
+
+```graphql
+mutation CreateCoffee {
+    createCoffee(createCoffeeInput: {
+        name: "test name",
+        brand: "test brand",
+        category: "test category"
+    }) {
+        id
+        name
+        brand
+        category
+        flavors {
+            name
+        }
+    }
+}
+```
+
+**return data**
+
+```json
+{
+    "data": {
+        "coffeeAdded": {
+            "id": "6",
+            "name": "test name",
+            "brand": "test brand",
+            "category": "test category"
+        }
+    }
+}
+```
+
+![image-20240331162143077](C:\Users\23200\AppData\Roaming\Typora\typora-user-images\image-20240331162143077.png)
+
+### （四）其他配置
+
+**filter**：事件过滤。仅返回符合条件的事件
+
+```ts
+@Subscription(
+    (returns) => Coffee,
+    {
+        name: 'coffeeAdded',
+        filter: (payload, variables) => (
+        	payload.coffeeAdded.id === variables.id
+        )
+    }
+)
+subscribeToCoffeeAdded(@Args('id') id: number) {
+	return this.pubsub.asyncIterator('coffeeAdded')
+}
+```
+
+测试下效果，仅当 id 为 1 时放行事件
+
+```
+subscription CoffeeAdded {
+    coffeeAdded(id: 1) {
+        id
+        name
+        brand
+        category
+    }
+}
+```
+
+![image-20240331163210166](C:\Users\23200\AppData\Roaming\Typora\typora-user-images\image-20240331163210166.png)
+
+**resolve**：修改数据。处理事件返回的响应数据
+
+```ts
+@Subscription(
+    (returns) => Coffee,
+    {
+        name: 'coffeeAdded',
+        // filter: (payload, variables) => (
+        //   payload.coffeeAdded.id === variables.id
+        // ),
+        resolve(this: CoffeesResolver, value) {
+            console.log(this)
+            return value
+        }
+    }
+)
+subscribeToCoffeeAdded(@Args('id') id: number) {
+    return this.pubsub.asyncIterator('coffeeAdded')
+}
+```
+
+## 六、标量类型
+
+GraphQL 对象类型的字段需要解析成具体的数据，这里就是**标量类型**的用武之地。
+
+GraphQL 包含几个默认的类型： `Int`、`Float`、`String`、`Boolean` 和 `ID`，除了这些内置的类型，还有比如 `Date` 等数据类型。
+
+### （一）标量类型
+
+Code-first 方法附带了五个标量类型，其中三个就是 GraphQL 默认类型的别名。
+
+- `ID` （别名：`GraphQLID`）： 表示一个唯一的标识符，通常用于获取数据或作为缓存的键
+- `Int` （别名：`GraphQLInt`）： 带符号的 32 位整数
+- `Float` （别名：`GraphQLFloat`）： 带符号的双精度浮点数
+- `GraphQLISODateTime` ：UTC格式的日期时间字符串（默认用于表示' Date '类型）
+- `GraphQLTimestamp` - 时间戳，一个有符号整数，表示日期和时间
+
+## 七、指令【Directives】
+
+directive 可以被绑定到字段或代码片段上，从而影响查询的执行。
+
+GraphQL 提供了几个默认的指令：
+
+- `@include(if: Boolean)`：参数为 true 时响应结果中才会包含该字段
+- `@skip(if: Boolean)`：参数为 true 时跳过该字段
+- `@deprecated(reason: String)`：标记该字段已经被废弃
+
+## 八、类型接口【Interfaces】
+
+首先，我们先定义一个抽象类型接口 `Character`，该接口需要使用 `@InterfaceType()` 装饰器标注。
+
+```ts
+// src/interfaces/character.interface.ts
+
+import { Field, ID, InterfaceType } from '@nestjs/graphql'
+
+@InterfaceType()
+export abstract class Character {
+  @Field(() => ID)
+  id: number
+
+  @Field()
+  name: string
+}
+```
+
+我们在接口中定义了两个属性：id 和 name，分别为 ID 和 String 类型，之后在实现具体接口时必须包含这两个字段。
+
+```ts
+// src/human/entities/human.entity.ts
+import { Field, ID, ObjectType } from '@nestjs/graphql'
+import { Character } from '@/interfaces/character.interface'
+
+@ObjectType({
+  implements: () => [Character]
+})
+export class HumanEntity implements Character {
+  @Field(() => ID)
+  id: number
+  name: string
+  job: string
+}
+```
+
+上面的代码中，除了继承 `Character` 类的原有字段，还添加了新的`job` 字段以实现 `HumanEntity` 类。
+
+> 该类需要在 `@ObjectType` 装饰器中添加 `implements: () => [Character]`。
+
+完成类型声明后，我们可以创建新的 resolver 文件，尝试使用定义好的类型。
+
+```ts
+// src/human/human.resolver.ts
+import { Args, Info, Parent, Query, ResolveField, Resolver } from '@nestjs/graphql'
+import { HumanEntity } from './entities/human.entity'
+
+@Resolver(() => HumanEntity)
+export class HumanResolver {
+
+  constructor() {}
+
+  @Query(() => HumanEntity, { name: 'characters' })
+  async findAllCharacters() {
+    return { id: 1, name: 'character', job: 'frontend-developer' }
+  }
+
+  @ResolveField(() => [HumanEntity])
+  friends(
+    // 解析出来的 HumanEntity 对象，friends 字段将会被插入该对象返给客户端
+    // Resolved object that implements HumanEntity
+    @Parent() character,
+    // HumanEntity 类
+    // Type of the object that implements HumanEntity
+    @Info() { parentType },
+    @Args('name', { type: () => String }) name: string
+  ) {
+    console.log(character, parentType, name)
+    return [{ id: 2, name: `test-${name}`, job: 'backend-developer' }]
+  }
+}
+```
+
+在 `human.resolver.ts` 中，我们实现了两个方法：
+
+- findAllCharacters： 查询角色列表
+- friends：生成 friends 字段
+
+如果代码正确执行，我们可以在 schema.sql 文件里看到找到以下内容：
+
+```graphql
+interface Character {
+  id: ID!
+  name: String!
+}
+type HumanEntity implements Character {
+  id: ID!
+  name: String!
+  job: String!
+  friends(name: String!): [HumanEntity!]!
+}
+type Query {
+  characters: HumanEntity!
+}
+```
+
+打开 postman，测试下能否查询到我们写死的数据
+
+```
+query Characters {
+    characters {
+        id
+        name
+        friends(name: "aa") {
+            id
+            name
+            job
+        }
+        job
+    }
+}
+```
+
+![image-20240404113524395](C:\Users\23200\AppData\Roaming\Typora\typora-user-images\image-20240404113524395.png)
+
+成功获取，完美。
+
+## 九、联合类型
+
+在定义联合类型之前，我们先定义两个子类型。
+
+第一个子类型，复用下上章节定义过的 `HumanEntity` 类
+
+```ts
+import { Field, ID, ObjectType } from '@nestjs/graphql'
+import { Character } from '@/interfaces/character.interface'
+
+@ObjectType({
+  implements: () => [Character]
+})
+export class HumanEntity implements Character {
+  @Field(() => ID)
+  id: number
+  name: string
+  job: string
+}
+```
+
+第二个子类型，`Social` 类
+
+```ts
+// src/human/entities/social.entity.ts
+import { ObjectType, createUnionType } from "@nestjs/graphql"
+import { HumanEntity } from "./human.entity"
+
+@ObjectType()
+export class SocialEntity {
+    url: string
+}
+```
+
+创建联合类型需要使用 createUnionType 方法
+
+> types 属性返回的数组必须使用 const 断言，否则会报错
+
+```ts
+export const ResultUnion = createUnionType({
+    name: 'ResultUnion',
+    types: () => [HumanEntity, SocialEntity] as const,
+    resolveType: (value) => {
+        if (value.id) return HumanEntity
+        if (value.url) return Social
+        return null
+    }
+})
+```
+
+默认的`resolveType` 函数会基于解析器方法返回的 value 抽离出类型，因此，我们在自定义 `resolveType` 函数是，返回值必须是 class 类，而不是 Javascript 对象。
+
+此时我们可以在 query 中使用定义好的联合类型
+
+```ts
+import { Query, Resolver } from '@nestjs/graphql'
+import { HumanEntity } from './entities/human.entity'
+import { ResultUnion } from './entities/social.entity'
+
+@Resolver(() => HumanEntity)
+export class HumanResolver {
+  constructor() {}
+
+  @Query(() => [ResultUnion])
+  search(): Array<typeof ResultUnion> {
+    return [
+      {
+        id: 1,
+        name: 'test aa',
+        job: 'developer'
+      },
+      {
+        url: 'https://github.com'
+      }
+    ]
+  }
+}
+```
+
+测试下
+
+```
+query Search {
+    search {
+        ... on HumanEntity {
+            id
+            name
+            job
+        }
+        ... on SocialEntity {
+            url
+        }
+    }
+}
+```
+
+![image-20240404144328313](C:\Users\23200\AppData\Roaming\Typora\typora-user-images\image-20240404144328313.png)
+
+## 十、Field Middleware
+
+Field Middleware 可以让我们在字段被解析之前或之后执行任意代码，比如转换字段的解析结果、校验字段参数等。
+
+首先，我们可以从创建一个简单的中间件开始，它会在字段值被发送回客户端之前将其打印出来。
+
+```ts
+// src/middleware/logger.middleware.ts
+import { FieldMiddleware, MiddlewareContext, NextFn } from "@nestjs/graphql";
+
+export const LoggerMiddleware: FieldMiddleware = async (
+    ctx: MiddlewareContext,
+    next: NextFn
+) => {
+    const value = await next()
+    console.log('logger', value)
+    return value
+}
+```
+
+之后，将该中间件绑定到上章节定义的 SocialEntity 上
+
+```ts
+@ObjectType()
+export class SocialEntity {
+  @Field({ middleware: [LoggerMiddleware] })
+  url: string
+}
+```
+
+重新调用一遍请求，可以看到在编辑器终端看到打印的结果，如下：
+
+![image-20240404152737363](C:\Users\23200\AppData\Roaming\Typora\typora-user-images\image-20240404152737363.png)
+
+除此之外，我们还可以对返回的字段值做一些处理，再创建一个 `upper.middleware.ts` 文件，并将新的 `UpperMiddleware` 绑定到 url 字段上
+
+```ts
+import { MiddlewareContext, NextFn } from '@nestjs/graphql'
+
+export const UpperMiddleware: FieldMiddleware = async (
+    ctx: MiddlewareContext,
+    next: NextFn
+) => {
+  const value = await next()
+  return value?.toUpperCase()
+}
+```
+
+```ts
+@ObjectType()
+export class SocialEntity {
+  @Field({ middleware: [LoggerMiddleware, UpperMiddleware] })
+  url: string
+}
+```
+
+看下结果，所有字符都已经被转换为大写了
+
+![image-20240404154208415](C:\Users\23200\AppData\Roaming\Typora\typora-user-images\image-20240404154208415.png)
+
+从上面的示例中可以看出，Nestjs 有提供为字段绑定多个中间件的能力，它们会按顺序被依次调用，数组中的第一个元素会最先被调用，最后执行结束
+
+因此，在上面的示例中，会按 `LoggerMiddleware -->  UpperMiddleware` 的顺序调用中间件，并按 `UpperMiddleware  -->  LoggerMiddleware` 返回数据
+
+除了 **@Field** 装饰器，字段中间件还可以被用在 **@ResolveField** 中或全局调用
+
+```ts
+@ResolveField(
+    () => String,
+    {
+        middleware: [loggerMiddleware]
+    }
+)
+title() {
+  return 'Placeholder';
+}
+```
+
+```ts
+GraphQLModule.forRoot({
+  autoSchemaFile: 'schema.gql',
+  buildSchemaOptions: {
+    fieldMiddleware: [loggerMiddleware],
+  }
+})
+```
+
+## 十一、类型映射
+
+在开发比如 CRUD 等功能时，从一个基础的实体类型开始构建不同的变体是很常见的处理办法。Nestjs 提供了多个实用函数帮助开发者处理类型转换任务。
+
+比如，在分别为 create 和 update 方法创建 DTOs 时，因为二者所需要的字段名称上都是一致的，区别只是某些字段是否可选。
+
+因此，往往并不需要创建两个 DTO 徒增工作量，直接在一个基础 DTO 上做处理即可。
+
+```ts
+import { Field, ID, InputType, OmitType, PartialType, PickType, extend } from "@nestjs/graphql";
+
+@InputType()
+export class UserInput {
+    @Field(() => ID)
+    id: string
+    name: string
+    password: string
+    email: string
+}
+
+@InputType()
+export class CreateUserInput extends PickType(UserInput, ['name', 'password'] as const) {}
+
+@InputType()
+export class ReadUserInput extends OmitType(UserInput, ['password'] as const) {}
+
+@InputType()
+export class UpdateUserInput extends PartialType(OmitType(UserInput, ['id', 'password'] as const)) {}
+```
+
+我们创建了四个 DTOs 来介绍常用的几个 Mapped Type。
+
+第一个：基础实体 `UserInput`：包含 id、name 等表示用户信息的字段。
+
+第二个 `CreateUserInput`：一般在比如注册场景中使用，以最常见的 "用户名+密码" 的形式，我们只需要用到 `UserInput` 中的 name 和 password。
+
+> `PickType` 可以从一个类型实体中提取出部分字段生成新的类型实体
+
+第三个 `ReadUserInput`：一般用于获取用户信息接口，出于安全性考虑，用户密码不推荐返回至客户端，我们需要除 password 以外的其他信息，此时更适合使用 `OmitType`
+
+> `OmitType` 会使用传入的类型中的所有字段创建新的类型，并根据第二个参数移除其指定的字段
+
+第四个`UpdateUserInput`：一般用于更新用户信息接口，我们只允许更新除了 id 和 password 以外的字段，此时可以组合多个 Mapped Types 实现
+
+> `PartialType` 默认情况下，会使用第一个参数所引用的相同的装饰器来标注 PartialType 创建的新类型。如果你不希望继承第一个参数的装饰器，可以自己手动指定，如下：
+>
+> ```typescript
+> @InputType()
+> export class UpdateUserInput extends PartialType(User, InputType) {}
+> ```
+
+## 十二、插件
+
+Nestjs 的插件系统继承了 Apollo Server 的核心功能，可以在 GraphQL 请求生命周期的特定阶段，或是Apollo Server 启动时执行自定义操作。
+
+首先介绍下，在 Nest 应用中如何使用插件。
+
+自定义的插件需要使用 @Plugin 装饰器标注，同时，可以通过实现 ApolloServerPlugin 类来获得更好的代码补全提示。
+
+```typescript
+import {
+  ApolloServerPlugin,
+  BaseContext,
+  GraphQLRequestContext,
+  GraphQLRequestListener
+} from '@apollo/server'
+import { Plugin } from '@nestjs/apollo'
+
+@Plugin()
+export class LoggerPlugin implements ApolloServerPlugin {
+  async requestDidStart(
+    requestContext: GraphQLRequestContext<BaseContext>
+  ): Promise<void | GraphQLRequestListener<BaseContext>> {
+    console.log('logger.plugin: ', 'request started')
+    return {
+      async willSendResponse() {
+        console.log('will send response')
+      }
+    }
+  }
+}
+```
+
+我们在之前定义过的 coffees.moudule.ts 中使用该插件，并重新查询一次。
+
+```ts
+import { Module } from '@nestjs/common'
+import { PubsubModule } from '@/resolvers/pubsub/pubsub.module'
+import { LoggerPlugin } from '@/plugins/logger.plugin'
+import { CoffeesResolver } from './coffees.resolver'
+
+@Module({
+  providers: [CoffeesResolver, LoggerPlugin],
+  imports: [PubsubModule]
+})
+export class CoffeesModule {}
+```
+
+返回结果如下，可以看出我们的自定义插件是生效的。
+
+![image-20240405164145644](C:\Users\23200\AppData\Roaming\Typora\typora-user-images\image-20240405164145644.png)
+
+
+
+
+
+
+
+
+
+
+

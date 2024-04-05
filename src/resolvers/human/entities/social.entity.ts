@@ -1,6 +1,6 @@
 import { Field, ObjectType, createUnionType } from '@nestjs/graphql'
-import { LoggerMiddleware } from '@/middleware/logger.middleware'
-import { UpperMiddleware } from '@/middleware/upper.middleware'
+import { LoggerMiddleware } from '@/middlewares/logger.middleware'
+import { UpperMiddleware } from '@/middlewares/upper.middleware'
 import { HumanEntity } from './human.entity'
 
 @ObjectType()
