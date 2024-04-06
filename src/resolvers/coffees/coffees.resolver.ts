@@ -8,49 +8,57 @@ import {
   Parent,
   Subscription
 } from '@nestjs/graphql'
-import { ParseIntPipe } from '@nestjs/common'
 import { PubSub } from 'graphql-subscriptions'
-import { CreateCoffeeInput } from './dto/create-coffee.input/create-coffee.input'
-import { Coffee } from './entities/coffee.entity'
-import { Flavor } from './entities/flavor.entity'
+import { CreateCoffeeInput } from './dto/create-coffee.input'
+import { CoffeeEntity } from './entities/coffee.entity'
+import { FlavorEntity } from './entities/flavor.entity'
+import { CoffeesService } from './coffees.service'
+import { UpdateCoffeeInput } from './dto/update-coffee.input'
 
-@Resolver(() => Coffee)
+@Resolver(() => CoffeeEntity)
 export class CoffeesResolver {
-  constructor(private readonly pubsub: PubSub) {}
+  constructor(
+    private readonly pubsub: PubSub,
+    private readonly coffeesService: CoffeesService
+  ) {}
 
-  @Query(() => [Coffee], { name: 'coffees' })
+  @Query(() => [CoffeeEntity], { name: 'coffees' })
   async findAllCoffees() {
-    return []
+    return this.coffeesService.findAll()
   }
 
-  @Query(() => Coffee, { name: 'coffee', nullable: true })
-  async findCoffeeById(@Args('id', { type: () => ID }, ParseIntPipe) id: number) {
-    console.log(id)
-    return null
+  @Query(() => CoffeeEntity, { name: 'coffee', nullable: true })
+  async findCoffeeById(@Args('id', { type: () => ID }) id: string) {
+    return this.coffeesService.findOne(id)
   }
 
-  @ResolveField('flavors', () => [Flavor])
-  async getFlavors(@Parent() coffee: Coffee) {
+  @ResolveField('flavors', () => [FlavorEntity])
+  async getFlavors(@Parent() coffee: CoffeeEntity) {
     const { category } = coffee
     console.log(category)
-    // return this.flavorService.findAllFlavors({ category })
-    return [{ name: 'test flavor', category: 'test category' }]
+    return this.coffeesService.getFlavorsByCategory(category)
+    // return [{ name: 'test flavor', category: 'test category' }]
   }
 
-  @Mutation(() => Coffee, { name: 'createCoffee', nullable: true })
+  @Mutation(() => CoffeeEntity, { name: 'createCoffee', nullable: true })
   async create(@Args('createCoffeeInput') createCoffeeInput: CreateCoffeeInput) {
-    const newCoffee = {
-      ...createCoffeeInput,
-      id: +(Math.random() * 10).toFixed(0),
-      flavors: [],
-      aaa: 1
-    }
-    console.log('new coffee', newCoffee)
-    this.pubsub.publish('coffeeAdded', { coffeeAdded: newCoffee })
-    return newCoffee
+    return this.coffeesService.create(createCoffeeInput)
   }
 
-  @Subscription(() => Coffee, {
+  @Mutation(() => CoffeeEntity, { name: 'updateCoffee', nullable: true })
+  async update(
+    @Args('id') id: string,
+    @Args('updateCoffeeInput') updateCoffeeInput: UpdateCoffeeInput
+  ) {
+    return this.coffeesService.update(id, updateCoffeeInput)
+  }
+
+  @Mutation(() => Boolean, { name: 'deleteCoffee', nullable: true })
+  async delete(@Args('id') id: string) {
+    return this.coffeesService.delete(id)
+  }
+
+  @Subscription(() => CoffeeEntity, {
     name: 'coffeeAdded',
     // filter: (payload, variables) => (
     //   payload.coffeeAdded.id === variables.id

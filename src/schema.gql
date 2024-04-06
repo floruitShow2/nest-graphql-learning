@@ -2,7 +2,7 @@
 # THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
 # ------------------------------------------------------
 
-type Flavor {
+type FlavorEntity {
   """A unique identifier for flavor"""
   id: ID
   name: String!
@@ -10,14 +10,20 @@ type Flavor {
 }
 
 """Coffee Model"""
-type Coffee {
+type CoffeeEntity {
   """A unique identifier"""
-  id: ID
-  flavors: [Flavor!]!
+  id: ID!
+  flavors: [FlavorEntity!]!
+  createAt: Timestamp
   name: String!
   brand: String!
   category: String!
 }
+
+"""
+`Date` type as integer. Type represents date and time as number of milliseconds from start of UNIX epoch.
+"""
+scalar Timestamp
 
 type HumanEntity implements Character {
   id: ID!
@@ -32,8 +38,8 @@ interface Character {
 }
 
 type Query {
-  coffees: [Coffee!]!
-  coffee(id: ID!): Coffee
+  coffees: [CoffeeEntity!]!
+  coffee(id: ID!): CoffeeEntity
   characters: HumanEntity!
   search: [ResultUnion!]!
 }
@@ -45,16 +51,23 @@ type SocialEntity {
 }
 
 type Mutation {
-  createCoffee(createCoffeeInput: CreateCoffeeInput!): Coffee
+  createCoffee(createCoffeeInput: CreateCoffeeInput!): CoffeeEntity
+  updateCoffee(id: String!, updateCoffeeInput: UpdateCoffeeInput!): CoffeeEntity
+  deleteCoffee(id: String!): Boolean
 }
 
 input CreateCoffeeInput {
-  """A new coffee name"""
   name: String!
   brand: String!
   category: String!
 }
 
+input UpdateCoffeeInput {
+  name: String
+  brand: String
+  category: String
+}
+
 type Subscription {
-  coffeeAdded(id: Float!): Coffee!
+  coffeeAdded(id: Float!): CoffeeEntity!
 }

@@ -1,4 +1,4 @@
-## 一、引言
+## 一、Intro
 
 **GraphQL** 是一种强大的 API 查询语言和运行时，用于实现使用现有数据的查询。
 
@@ -16,7 +16,7 @@
 
 
 
-## 二、快速开始
+## 二、Quick Start
 
 ### （一）介绍
 
@@ -150,7 +150,7 @@ nest g resolver coffees
 以下是我们使用 Typescript 类和装饰器实现的 Coffee Object Types：
 
 ```ts
-// coffees/entities/coffee.entity.ts
+// resolvers/coffees/entities/coffee.entity.ts
 import { Field, ID, ObjectType } from '@nestjs/graphql'
 import { Flavor } from './flavor.entity'
 
@@ -164,7 +164,6 @@ export class Coffee {
   @Field(() => [Flavor], { nullable: 'items' })
   flavors: Flavor[]
 }
-
 ```
 
 我们可以借助 nestjs 提供的插件机制，`@nestjs/graphql`可以帮助我们自行推断 Object Types 中属性的类型，并在生成的 SDL 中标注上对应的 GraphQL Types，从而省去我们编写大量模板代码的时间。
@@ -223,7 +222,7 @@ flavors: Flavor[]
 > 表示数组本身及其内部元素都不为空，使用 `nullable: 'itemsAndList'`
 
 ```ts
-// coffees/entities/flavor.entity.ts
+// resolvers/coffees/entities/flavor.entity.ts
 import { Field, ID, ObjectType } from "@nestjs/graphql";
 
 @ObjectType()
@@ -240,7 +239,7 @@ export class Flavor {
 截至目前，我们已经分别定义好了 Coffee 和 Flavor 类型定义，但是应用还不同和这些类型进行交互，为了解决这个问题，我们需要创建一个解析器类，在 Code First 中，解析器可以定义解析器函数并生成查询类型。
 
 ```ts
-// /coffees/coffees.resolver.ts
+// resolvers/coffees/coffees.resolver.ts
 import { Resolver, Query, ID, Args, Mutation, ResolveField, Parent } from '@nestjs/graphql'
 import { ParseIntPipe } from '@nestjs/common'
 import { CreateCoffeeInput } from './dto/create-coffee.input/create-coffee.input'
@@ -526,7 +525,7 @@ async create(@Args('createCoffeeInput') createCoffeeInput: CreateCoffeeInput) {
 由于该 mutation 函数接收的参数是一个复杂对象，我们可以使用 `@InputType()` 装饰器创建类型：
 
 ```ts
-// /coffees/dto/create-coffee.input.ts
+// resolvers/coffees/dto/create-coffee.input.ts
 import { Field, InputType } from '@nestjs/graphql'
 
 @InputType()
@@ -850,7 +849,7 @@ subscribeToCoffeeAdded(@Args('id') id: number) {
 }
 ```
 
-## 六、标量类型
+## 六、Scalars
 
 GraphQL 对象类型的字段需要解析成具体的数据，这里就是**标量类型**的用武之地。
 
@@ -866,23 +865,151 @@ Code-first 方法附带了五个标量类型，其中三个就是 GraphQL 默认
 - `GraphQLISODateTime` ：UTC格式的日期时间字符串（默认用于表示' Date '类型）
 - `GraphQLTimestamp` - 时间戳，一个有符号整数，表示日期和时间
 
-## 七、指令【Directives】
+默认情况下，`GraphQLISODateTime`会用于表示 Date 类型，如果希望使用 GraphQLISODateTime 替代的话，可以通过设置 `dateScalarMode: 'timestamp'` 实现，如下：
 
-directive 可以被绑定到字段或代码片段上，从而影响查询的执行。
+```ts
+GraphQLModule.forRoot({
+  buildSchemaOptions: {
+    dateScalarMode: 'timestamp',
+  }
+})
+```
 
-GraphQL 提供了几个默认的指令：
+我们可以对比下设置前后查询 Date 类型数据时的返回结果
 
-- `@include(if: Boolean)`：参数为 true 时响应结果中才会包含该字段
-- `@skip(if: Boolean)`：参数为 true 时跳过该字段
-- `@deprecated(reason: String)`：标记该字段已经被废弃
+设置前：
 
-## 八、类型接口【Interfaces】
+![image-20240406165743349](C:\Users\23200\AppData\Roaming\Typora\typora-user-images\image-20240406165743349.png)
+
+设置后：
+
+![image-20240406165828596](C:\Users\23200\AppData\Roaming\Typora\typora-user-images\image-20240406165828596.png)
+
+可以看出，设置 `dateScalarMode: 'timestamp'` 后返回 createAt 字段值被转换成了时间戳。
+
+### （二）重写默认标量
+
+除了设置 `dateScalarMode`外，我们还可以通过重写 Date 标量本身来实现转换为时间戳的需求。
+
+```ts
+import { Scalar, CustomScalar } from '@nestjs/graphql';
+import { Kind, ValueNode } from 'graphql';
+
+@Scalar('Date', (type) => Date)
+export class DateScalar implements CustomScalar<number, Date> {
+  description = 'Date custom scalar type'
+
+  parseValue(value: number): Date {
+    return new Date(value)
+  }
+
+  serialize(value: Date): number {
+    return value.getTime()
+  }
+
+  parseLiteral(ast: ValueNode): Date {
+    if (ast.kind === Kind.INT) {
+      return new Date(ast.value)
+    }
+    return null
+  }
+}
+```
+
+对比修改配置的方式，重写 Date 标量无疑给开发者更高的自由度，能够实现更加灵活的功能。
+
+> 注：`CustomScalar<number, Date>` 写在泛型中的两个类型
+>
+> ```ts
+> interface CustomScalar<T, K> {
+>  description?: string;
+>  parseValue: GraphQLScalarValueParser<K>;
+>  serialize: GraphQLScalarSerializer<T>;
+>  parseLiteral: GraphQLScalarLiteralParser<K>;
+> }
+> ```
+>
+> 查看该类的类型声明可知，第一个类型表示序列化函数 serialize 参数的类型，第二个类型则表示剩余两个方法的参数类型
+
+使用重写后的标量，直接将其添加到目标模块的 providers 中即可
+
+```ts
+import { Module } from '@nestjs/common'
+import { DateScalar } from '@/scalars/date.scalar';
+import { CoffeesResolver } from './coffees.resolver'
+import { CoffeesService } from './coffees.service';
+
+@Module({
+  providers: [
+    CoffeesResolver,
+    CoffeesService,
+    // Date 标量
+    DateScalar
+  ],
+  imports: []
+})
+export class CoffeesModule {}
+```
+
+### （三）自定义标量
+
+自定义标量需要用到 `GraphQLScalarType` 这个类。我们需要分别实现三个方法：
+
+1. serialize
+   - **作用**：将值从内部值序列化为有效的外部值输出。
+   - **使用场景**：当 GraphQL 字段解析器返回一个值时，该值将被传入 `serialize`。返回值将作为该字段的最终有效响应。
+2. parseValue
+   - **作用**：将值从传入的反序列化外部值解析为有效的内部值。
+   - **使用场景**：当该标量用作查询的变量或输入字段的参数时，将调用此方法保证与数据库存储结果一致。
+3. parseLiteral
+   - **作用**：将AST（抽象语法树）的值解析为有效的内部值。
+   - **使用场景**：当该标量作为查询或输入值的内联常量时将调用此方法。
+
+下文的示例中，我们会创建一个 UUID 的标量，用来校验参数或返回值中的 UUID 是否有效
+
+```typescript
+const regex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function validate(uuid: unknown): string | never {
+  if (typeof uuid !== "string" || !regex.test(uuid)) {
+    throw new Error("invalid uuid");
+  }
+  return uuid;
+}
+
+export const CustomUuidScalar = new GraphQLScalarType({
+  name: 'UUID',
+  description: 'A simple UUID parser',
+  serialize: (value) => validate(value),
+  parseValue: (value) => validate(value),
+  parseLiteral: (ast) => validate(ast.value)
+})
+```
+
+```typescript
+@Module({
+  imports: [
+    GraphQLModule.forRoot({
+      resolvers: { UUID: CustomUuidScalar },
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+```typescript
+@Field((type) => CustomUuidScalar)
+uuid: string;
+```
+
+## 七、Interfaces
+
+### （一）类型接口
 
 首先，我们先定义一个抽象类型接口 `Character`，该接口需要使用 `@InterfaceType()` 装饰器标注。
 
 ```ts
 // src/interfaces/character.interface.ts
-
 import { Field, ID, InterfaceType } from '@nestjs/graphql'
 
 @InterfaceType()
@@ -994,7 +1121,7 @@ query Characters {
 
 成功获取，完美。
 
-## 九、联合类型
+### （二）联合类型
 
 在定义联合类型之前，我们先定义两个子类型。
 
@@ -1092,7 +1219,58 @@ query Search {
 
 ![image-20240404144328313](C:\Users\23200\AppData\Roaming\Typora\typora-user-images\image-20240404144328313.png)
 
-## 十、Field Middleware
+### （三）类型映射
+
+在开发比如 CRUD 等功能时，从一个基础的实体类型开始构建不同的变体是很常见的处理办法。Nestjs 提供了多个实用函数帮助开发者处理类型转换任务。
+
+比如，在分别为 create 和 update 方法创建 DTOs 时，因为二者所需要的字段名称上都是一致的，区别只是某些字段是否可选。
+
+因此，往往并不需要创建两个 DTO 徒增工作量，直接在一个基础 DTO 上做处理即可。
+
+```ts
+import { Field, ID, InputType, OmitType, PartialType, PickType, extend } from "@nestjs/graphql";
+
+@InputType()
+export class UserInput {
+    @Field(() => ID)
+    id: string
+    name: string
+    password: string
+    email: string
+}
+
+@InputType()
+export class CreateUserInput extends PickType(UserInput, ['name', 'password'] as const) {}
+
+@InputType()
+export class ReadUserInput extends OmitType(UserInput, ['password'] as const) {}
+
+@InputType()
+export class UpdateUserInput extends PartialType(OmitType(UserInput, ['id', 'password'] as const)) {}
+```
+
+我们创建了四个 DTOs 来介绍常用的几个 Mapped Type。
+
+第一个：基础实体 `UserInput`：包含 id、name 等表示用户信息的字段。
+
+第二个 `CreateUserInput`：一般在比如注册场景中使用，以最常见的 "用户名+密码" 的形式，我们只需要用到 `UserInput` 中的 name 和 password。
+
+> `PickType` 可以从一个类型实体中提取出部分字段生成新的类型实体
+
+第三个 `ReadUserInput`：一般用于获取用户信息接口，出于安全性考虑，用户密码不推荐返回至客户端，我们需要除 password 以外的其他信息，此时更适合使用 `OmitType`
+
+> `OmitType` 会使用传入的类型中的所有字段创建新的类型，并根据第二个参数移除其指定的字段
+
+第四个`UpdateUserInput`：一般用于更新用户信息接口，我们只允许更新除了 id 和 password 以外的字段，此时可以组合多个 Mapped Types 实现
+
+> `PartialType` 默认情况下，会使用第一个参数所引用的相同的装饰器来标注 PartialType 创建的新类型。如果你不希望继承第一个参数的装饰器，可以自己手动指定，如下：
+>
+> ```typescript
+> @InputType()
+> export class UpdateUserInput extends PartialType(User, InputType) {}
+> ```
+
+## 八、Field Middleware
 
 Field Middleware 可以让我们在字段被解析之前或之后执行任意代码，比如转换字段的解析结果、校验字段参数等。
 
@@ -1179,58 +1357,7 @@ GraphQLModule.forRoot({
 })
 ```
 
-## 十一、类型映射
-
-在开发比如 CRUD 等功能时，从一个基础的实体类型开始构建不同的变体是很常见的处理办法。Nestjs 提供了多个实用函数帮助开发者处理类型转换任务。
-
-比如，在分别为 create 和 update 方法创建 DTOs 时，因为二者所需要的字段名称上都是一致的，区别只是某些字段是否可选。
-
-因此，往往并不需要创建两个 DTO 徒增工作量，直接在一个基础 DTO 上做处理即可。
-
-```ts
-import { Field, ID, InputType, OmitType, PartialType, PickType, extend } from "@nestjs/graphql";
-
-@InputType()
-export class UserInput {
-    @Field(() => ID)
-    id: string
-    name: string
-    password: string
-    email: string
-}
-
-@InputType()
-export class CreateUserInput extends PickType(UserInput, ['name', 'password'] as const) {}
-
-@InputType()
-export class ReadUserInput extends OmitType(UserInput, ['password'] as const) {}
-
-@InputType()
-export class UpdateUserInput extends PartialType(OmitType(UserInput, ['id', 'password'] as const)) {}
-```
-
-我们创建了四个 DTOs 来介绍常用的几个 Mapped Type。
-
-第一个：基础实体 `UserInput`：包含 id、name 等表示用户信息的字段。
-
-第二个 `CreateUserInput`：一般在比如注册场景中使用，以最常见的 "用户名+密码" 的形式，我们只需要用到 `UserInput` 中的 name 和 password。
-
-> `PickType` 可以从一个类型实体中提取出部分字段生成新的类型实体
-
-第三个 `ReadUserInput`：一般用于获取用户信息接口，出于安全性考虑，用户密码不推荐返回至客户端，我们需要除 password 以外的其他信息，此时更适合使用 `OmitType`
-
-> `OmitType` 会使用传入的类型中的所有字段创建新的类型，并根据第二个参数移除其指定的字段
-
-第四个`UpdateUserInput`：一般用于更新用户信息接口，我们只允许更新除了 id 和 password 以外的字段，此时可以组合多个 Mapped Types 实现
-
-> `PartialType` 默认情况下，会使用第一个参数所引用的相同的装饰器来标注 PartialType 创建的新类型。如果你不希望继承第一个参数的装饰器，可以自己手动指定，如下：
->
-> ```typescript
-> @InputType()
-> export class UpdateUserInput extends PartialType(User, InputType) {}
-> ```
-
-## 十二、插件
+## 九、Plugins
 
 Nestjs 的插件系统继承了 Apollo Server 的核心功能，可以在 GraphQL 请求生命周期的特定阶段，或是Apollo Server 启动时执行自定义操作。
 
@@ -1283,11 +1410,357 @@ export class CoffeesModule {}
 
 
 
+## 十、CRUD
 
+在本章节，我们会在之前编写的 coffees 模块基础上编写一套 CRUD 接口，实践下前文学习的内容。
 
+### （一）连接数据库
 
+我用的数据库是 MongoDB。如果你用的数据库与示例不同，可以先看看 graphql 部分的代码，然后用自己习惯的数据库实现这些功能。
 
+```ts
+import { Module } from '@nestjs/common'
+import { GraphQLModule } from '@nestjs/graphql'
+import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo'
+import { MongooseModule } from '@nestjs/mongoose'
+import { join } from 'path'
+import { AppController } from './app.controller'
+import { AppService } from './app.service'
+import { CoffeesModule, PubsubModule } from './resolvers'
 
+@Module({
+  imports: [
+    GraphQLModule.forRoot<ApolloDriverConfig>({
+      driver: ApolloDriver,
+      autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
+      // 在 Apollo Driver 上激活 Subscription 功能
+      subscriptions: {
+        'graphql-ws': true
+      }
+    }),
+    // 连接我们的 mongodb 数据库
+    MongooseModule.forRootAsync({
+      useFactory: async () => {
+        return { uri: 'mongodb://localhost:27017/meleon' }
+      },
+    }),
+    CoffeesModule,
+    PubsubModule
+  ],
+  controllers: [AppController],
+  providers: [AppService]
+})
+export class AppModule {}
+```
 
+### （二）创建实体
 
+分别创建 `CoffeeEntity` 和 `FlavorEntity` 
 
+```ts
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose'
+import { Field, ID, ObjectType } from '@nestjs/graphql'
+import { Document } from 'mongoose'
+import { MinLength } from 'class-validator'
+import { FlavorEntity } from './flavor.entity'
+
+@Schema()
+@ObjectType({ description: 'Coffee Model' })
+export class CoffeeEntity extends Document {
+  @Prop()
+  @Field(() => ID, { nullable: false, description: 'A unique identifier' })
+  id: string
+  
+  @Prop()
+  @MinLength(3)
+  name: string
+
+  @Prop()
+  brand: string
+
+  @Prop()
+  category: string
+
+  @Prop()
+  @Field(() => [FlavorEntity], { nullable: 'items' })
+  flavors?: FlavorEntity[]
+
+  @Prop()
+  @Field()
+  createAt?: Date
+}
+
+export const CoffeeSchema = SchemaFactory.createForClass(CoffeeEntity)
+```
+
+```ts
+// resolvers/coffees/entities/flavor.entity.ts
+import { Field, ID, ObjectType } from '@nestjs/graphql'
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose'
+
+@Schema()
+@ObjectType()
+export class FlavorEntity {
+  @Prop()
+  @Field(() => ID, { nullable: true, description: 'A unique identifier for flavor' })
+  id: number
+  
+  @Prop()
+  name: string
+  
+  @Prop()
+  category: string
+}
+
+export const FlavorSchema = SchemaFactory.createForClass(FlavorEntity)
+```
+
+这两个类型实体是我们编写接口代码的基础，包括上述代码中已经演示的创建 Mongoose Schema，还承担参数校验、连接 collections 等任务，后续会经常直接或间接地用到它们。
+
+### （三）连接 Collections
+
+在创建类型实体时，也顺便创建了对应的 Schema，我们需要用到它们来连接数据库中对应的 Collections。
+
+进入 coffees.module.ts 文件
+
+```ts
+import { Module } from '@nestjs/common'
+import { MongooseModule } from '@nestjs/mongoose';
+import { PubsubModule } from '@/resolvers/pubsub/pubsub.module'
+import { LoggerPlugin } from '@/plugins/logger.plugin'
+import { CoffeesResolver } from './coffees.resolver'
+import { CoffeesService } from './coffees.service';
+import { CoffeeEntity, CoffeeSchema } from './entities/coffee.entity';
+import { FlavorEntity, FlavorSchema } from './entities/flavor.entity';
+
+@Module({
+  providers: [
+    CoffeesResolver,
+    LoggerPlugin,
+    CoffeesService
+  ],
+  imports: [
+    MongooseModule.forFeature([
+        { name: CoffeeEntity.name, schema: CoffeeSchema, collection: 'coffees' },
+        { name: FlavorEntity.name, schema: FlavorSchema, collection: 'flavors' }
+    ]),
+    PubsubModule
+  ]
+})
+export class CoffeesModule {}
+```
+
+我们会分别连接到 `coffees` 和 `flavors` 两个 `collection`。
+
+### （四）查询功能
+
+查询功能相对比较简单，不需要我们定义新的 DTO。
+
+我们分别定义 `findAllCoffees` 和 `findCoffeeById` 两个方法
+
+```ts
+// resolvers/coffees/coffee.resolver.ts
+@Resolver(() => CoffeeEntity)
+export class CoffeesResolver {
+  constructor(private readonly coffeesService: CoffeesService) {}
+
+  @Query(() => [CoffeeEntity], { name: 'coffees' })
+  async findAllCoffees() {
+    return this.coffeesService.findAll()
+  }
+
+  @Query(() => CoffeeEntity, { name: 'coffee', nullable: true })
+  async findCoffeeById(@Args('id', { type: () => ID }) id: string) {
+    return this.coffeesService.findOne(id)
+  }
+}
+```
+
+在编写 services 功能时，考虑到其他接口可能需要用到同样的功能，最好将通用功能抽离出来，方便后续开发。
+
+```ts
+@Injectable()
+export class CoffeesService {
+  constructor(
+    @InjectModel(CoffeeEntity.name) private readonly coffeeModel: Model<CoffeeEntity>,
+    @InjectModel(FlavorEntity.name) private readonly flavorModel: Model<FlavorEntity>,
+    private readonly pubsub: PubSub
+  ) {}
+
+  async findAll() {
+    return await this.coffeeModel.find()
+  }
+
+  async findOne(id: string) {
+    return await this.coffeeModel.findOne({ _id: id })
+  }
+}
+```
+
+`findAllCoffees` 功能演示
+
+![image-20240406182744562](C:\Users\23200\AppData\Roaming\Typora\typora-user-images\image-20240406182744562.png)
+
+`findCoffeeById`功能演示
+
+![image-20240406182829986](C:\Users\23200\AppData\Roaming\Typora\typora-user-images\image-20240406182829986.png)
+
+### （五）创建功能
+
+第一步，确定参数类型，创建 DTO
+
+```ts
+// resolvers/coffees/dto/create-coffee.input.ts
+@InputType()
+export class CreateCoffeeInput extends PickType(CoffeeEntity, ['name', 'brand', 'category'] as const, InputType) {}
+```
+
+这里我们会用到第七节里提到到 PickType，直接从 CoffeeEntity 中提取我们需要的字段
+
+> 注：`CoffeeEntity` 用的是 `@ObjectType` 装饰器，此处需要传入第三个参数，指明当前类的装饰器类型
+
+第二步，在 service 中编写功能
+
+```ts
+// resolvers/coffees/coffee.service.ts
+@Injectable()
+export class CoffeesService {
+    constructor(
+        @InjectModel(CoffeeEntity.name) private readonly coffeeModel: Model<CoffeeEntity>,
+        @InjectModel(FlavorEntity.name) private readonly flavorModel: Model<FlavorEntity>,
+        private readonly pubsub: PubSub
+    ) {}
+
+    async findOne(id: string) {
+        return await this.coffeeModel.findOne({ _id: id })
+    }
+
+    async create(createCoffeeInput: CreateCoffeeInput) {
+        const res = await this.coffeeModel.create({ ...createCoffeeInput, createAt: new Date() })
+        const savedCoffee = await res.save()
+
+        savedCoffee.id = savedCoffee._id.toString()
+        this.pubsub.publish('coffeeAdded', { coffeeAdded: savedCoffee })
+        return savedCoffee
+    }
+}
+```
+
+第三步，创建接口处理器，使用 `@Arg` 接收参数
+
+```ts
+// resolvers/coffees/coffee.resolver.ts
+@Resolver(() => CoffeeEntity)
+export class CoffeesResolver {
+  constructor(private readonly coffeesService: CoffeesService) {}
+
+  @Mutation(() => CoffeeEntity, { name: 'createCoffee', nullable: true })
+  async create(@Args('createCoffeeInput') createCoffeeInput: CreateCoffeeInput) {
+    return this.coffeesService.create(createCoffeeInput)
+  }
+}
+```
+
+`create`功能演示
+
+![image-20240406183158122](C:\Users\23200\AppData\Roaming\Typora\typora-user-images\image-20240406183158122.png)
+
+### （六）更新与删除
+
+更新功能与删除功能参照创建接口的步骤，按部就班即可。
+
+```ts
+// resolvers/coffees/dto/update-coffee.input.ts
+@InputType()
+export class UpdateCoffeeInput extends PartialType(CreateCoffeeInput) {}
+```
+
+```ts
+// resolvers/coffees/coffee.service.ts
+@Injectable()
+export class CoffeesService {
+  constructor(
+    @InjectModel(CoffeeEntity.name) private readonly coffeeModel: Model<CoffeeEntity>,
+    @InjectModel(FlavorEntity.name) private readonly flavorModel: Model<FlavorEntity>,
+    private readonly pubsub: PubSub
+  ) {}
+
+  async update(id: string, updateCoffeeInput: UpdateCoffeeInput) {
+    const res = await this.coffeeModel.updateOne(
+      {
+        _id: id
+      },
+      {
+        $set: updateCoffeeInput
+      }
+    )
+    const { matchedCount, modifiedCount } = res
+    if (matchedCount >= 1 && modifiedCount === 1) {
+      const res = await this.findOne(id)
+      res.id = res._id.toString()
+      return res
+    } else {
+      return null
+    }
+  }
+
+  async delete(id: string) {
+    const res = await this.coffeeModel.deleteOne({ _id: id })
+    if (res.deletedCount > 0) return true
+    else return false
+  }
+
+  async getFlavorsByCategory(category: string) {
+    const res = await this.flavorModel.find({ category })
+    return res || []
+  }
+}
+```
+
+```ts
+// resolvers/coffees/coffee.resolver.ts
+@Resolver(() => CoffeeEntity)
+export class CoffeesResolver {
+  constructor(
+    private readonly pubsub: PubSub,
+    private readonly coffeesService: CoffeesService
+  ) {}
+
+  @ResolveField('flavors', () => [FlavorEntity])
+  async getFlavors(@Parent() coffee: CoffeeEntity) {
+    const { category } = coffee
+    return this.coffeesService.getFlavorsByCategory(category)
+  }
+
+  @Mutation(() => CoffeeEntity, { name: 'updateCoffee', nullable: true })
+  async update(
+    @Args('id') id: string,
+    @Args('updateCoffeeInput') updateCoffeeInput: UpdateCoffeeInput
+  ) {
+    return this.coffeesService.update(id, updateCoffeeInput)
+  }
+
+  @Mutation(() => Boolean, { name: 'deleteCoffee', nullable: true })
+  async delete(@Args('id') id: string) {
+    return this.coffeesService.delete(id)
+  }
+}
+```
+
+> `getFlavors` 会在客户端需要返回 flavors 字段时，根据 coffee 中的 category 查询数据
+
+`update` 功能演示
+
+![image-20240406185242129](C:\Users\23200\AppData\Roaming\Typora\typora-user-images\image-20240406185242129.png)
+
+`delete` 功能演示
+
+![image-20240406185452009](C:\Users\23200\AppData\Roaming\Typora\typora-user-images\image-20240406185452009.png)
+
+## 十一、Conclusion
+
+趁假期学习了下 Nestjs GraphQL 相关的章节，整体看来，Nestjs 官网对于这部分的介绍还是比较全面的，开发中可能涉及到的概念基本上都有相关的章节做介绍，带领入门完全足够。
+
+但是，由于 Nestjs GraphQL 既支持多种驱动服务器，又支持 Code First 和 Schema First 两种编码风格，在更细节的内容的介绍上，肯定做不到尽善尽美，比如 Plugin 章节，涉及到 Apollo Server 生命周期的部分仅提供了使用部分生命周期的示例。深入研究的话还是要去看下对应驱动服务器的官方文档。
+
+以上，暂时结束这一章节后，目前计划是把 Nestjs 官网上最后一个大篇章 MicroService 学习完，害，任重而道远！
